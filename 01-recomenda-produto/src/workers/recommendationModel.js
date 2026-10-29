@@ -56,14 +56,14 @@ class RecommendationModel {
         const ages = userList.map((user) => user.age);
         const minAge = ages.length ? Math.min(...ages) : -1;
         const maxAge = ages.length ? Math.max(...ages) : -1;
-        const midAge = ages.length
-                    ? (minAge + maxAge) / 2
-                    : null;
+        const midAge = ages.length ? (minAge + maxAge) / 2 : null;
         const catalog = catalogList.map((product, index) => ({
             index,
-            price: Number(product.price),
-            color: String(product.color),
-            category: String(product.category)
+            name: product.name,
+            price: product.price,
+            color: product.color,
+            category: product.category,
+            statics: { ageSum: 0, count: 0, avgAge: 0, avgAgeNormalized: 0 }
         }));
 
         const prices = catalog.map((product) => product.price);
@@ -83,35 +83,38 @@ class RecommendationModel {
                 return acc;
             }, {});
 
-        
-
-        Object.entries(catalogList).forEach(([, product]) => {
-            if (!staticsByProduct[product.name]) {
-                staticsByProduct[product.name] = { ageSum: 0, count: 0, avgAge: 0, avgAgeNormalized: 0 };
+       
+        Object.entries(catalog).forEach(([, product]) => {
+            let stat = staticsByProduct[product.name];
+            if (!stat) {
+                stat = { ageSum: 0, count: 0, avgAge: 0, avgAgeNormalized: 0 };
             }
-            const stat = staticsByProduct[product.name];
             stat.avgAge = stat.ageSum / (stat.count || 1);
             stat.avgAgeNormalized = stat.avgAge > 0 ? normalize(stat.avgAge, minAge, maxAge) : 0;
+            product.statics = stat;
         });
 
-        const purchasedProducts = catalogList.filter(
-            (product) => staticsByProduct[product.name].count > 0
-        );
+        const purchasedProducts = catalog.filter((product) => staticsByProduct[product.name] && staticsByProduct[product.name].count > 0);
+        const colorCount = new Set(
+            purchasedProducts.map((product) => product.color).filter(Boolean)
+        ).size;
+        const categoryCount = new Set(
+            purchasedProducts.map((product) => product.category).filter(Boolean)
+        ).size;
 
         return {
             minPrice: prices.length ? Math.min(...prices) : null,
             maxPrice: prices.length ? Math.max(...prices) : null,
-            colorCount: new Set(purchasedProducts.map((product) => product.color)).size,
-            categoryCount: new Set(purchasedProducts.map((product) => product.category)).size,
+            colorCount: colorCount,
+            categoryCount: categoryCount,
             catalog,
             users: {
                 minAge: minAge,
                 maxAge: maxAge,
                 midAge: midAge,
-                staticsByProduct
                 // list: users
             },
-            dimentions: 2 + ages.length + catalog.length //não vi sentido nisso
+            dimentions: 2 + categoryCount + colorCount //2 (preço e idade) + categorias + cores
         };
     }
 }
