@@ -77,15 +77,6 @@ class RecommendationModel {
     }
 
     #buildState(catalogList, userList) {
-        // const users = userList.map((user, index) => ({
-        //     index,
-        //     age: Number(user.age),
-        //     purchases: user.purchases.map((purchase) => ({
-        //         name: String(purchase.name),
-        //         price: Number(purchase.price)
-        //     }))
-        // }));
-
         const staticDefaultValue = { ageSum: 0, count: 0, avgAge: 0, avgAgeNormalized: 0, color: '', category: '' };
 
         const ages = userList.map((user) => user.age);
@@ -172,19 +163,61 @@ class RecommendationModel {
             .concat1d([product.vectors.price, product.vectors.age, product.vectors.category, product.vectors.color]);
         });
 
+        const dimentions = 2 + categories.length + colors.length; //2 (preço e idade) + categorias + cores
+
+        const users = userList.map((user, index) => {
+            let r = {
+                index,
+                age: user.age,
+                purchases: user.purchases.map((purchase) => {
+                    let pr = {
+                        name: purchase.name,
+                        price: purchase.price,
+                        concatVector: catalog.find((product) => product.name === purchase.name).vectors.concat
+                    };
+                    return pr;
+                }),
+                vectors: {
+                    stack: null
+                }
+            };
+
+            if (r.purchases.length) {
+                r.vectors.stack = tf
+                .stack(r.purchases.map((purchase) => purchase.concatVector))
+                .mean(0)
+                .reshape([1,dimentions]);
+            }
+
+            return r;
+
+        });
+
+        const trainingDataInputs = users
+        .flatMap((user) => catalog.map((product) => {
+            return {
+                label: user.purchases.some((purchase) => purchase.name === product.name) ? 1 : 0,
+                user: user.vectors.stack?.dataSync(), // Use dataSync() to get the underlying data as a typed array
+                product: product.vectors.concat.dataSync() // Use dataSync() to get the underlying data as a typed array
+            };
+        }));
+
         return {
-            minPrice: minPrice,
-            maxPrice: maxPrice,
-            colorCount: colors.length,
-            categoryCount: categories.length,
-            catalog,
+            products: {          
+                minPrice: minPrice,
+                maxPrice: maxPrice,
+                colorCount: colors.length,
+                categoryCount: categories.length,
+                list: catalog
+            },
             users: {
                 minAge: minAge,
                 maxAge: maxAge,
                 midAge: midAge,
-                // list: users
+                list: users
             },
-            dimentions: 2 + categories.length + colors.length //2 (preço e idade) + categorias + cores
+            dimentions: dimentions,
+            trainingDataInputs: trainingDataInputs
         };
     }
 }

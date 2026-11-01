@@ -15,7 +15,7 @@ async function trainModel({ users }) {
     await recommendationModel.reload(users);
     console.log('recommendationModel.state', recommendationModel.state);  
     
-    const productVectors = recommendationModel.state.catalog
+    const productVectors = recommendationModel.state.products.list
     .map(product => {
         return {
             name: product.name, 
@@ -24,8 +24,19 @@ async function trainModel({ users }) {
         };
     }); 
 
+    const usersVectors = recommendationModel.state.users.list
+    .map(user => {
+        return {
+            name: user.name,
+            meta: {...user},
+            
+            vector: user.vectors.stack.dataSync()
+        };
+    });
+
     console.log('productVectors', productVectors);
-    
+    console.log('usersVectors', usersVectors);
+
     postMessage({
         type: workerEvents.trainingLog,
         epoch: 1,
