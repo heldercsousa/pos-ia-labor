@@ -13,8 +13,18 @@ async function trainModel({ users }) {
     });
 
     await recommendationModel.reload(users);
-    console.log('recommendationModel.state', recommendationModel.state);    
+    console.log('recommendationModel.state', recommendationModel.state);  
+    
+    const productVectors = recommendationModel.state.catalog
+    .map(product => {
+        return {
+            name: product.name, 
+            meta: {...product},
+            vector: product.vectors.concat.dataSync() // Use dataSync() to get the underlying data as a typed array
+        };
+    }); 
 
+    console.log('productVectors', productVectors);
     
     postMessage({
         type: workerEvents.trainingLog,
