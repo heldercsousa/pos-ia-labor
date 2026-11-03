@@ -44,7 +44,7 @@ class RecommendationModel {
     weights = this.weightsDefault;
 
     #state = null;
-    #model = null;
+    #trainedModel = null;
 
     /**
      * return the default weights for the recommendation model.
@@ -64,11 +64,11 @@ class RecommendationModel {
     }
 
     /**
-     * Trained recommendation model, or `null` until training succeeds.
+     * Trained recommendation model for TensorFlow usage, based on state.trainingDataInputs, or `null` until training succeeds.
      * @returns {*}
      */
-    get model() {
-        return this.#model;
+    get trainedModel() {
+        return this.#trainedModel;
     }
 
     /**
@@ -194,23 +194,7 @@ class RecommendationModel {
                 }
             };
 
-            if (r.purchases.length) {
-                r.vectors.stack = tf
-                .stack(r.purchases.map((purchase) => purchase.concatVector))
-                .mean(0)
-                .reshape([1,dimentions]);
-            } else {
-                r.vectors.stack = tf
-                .concat1d([
-                    tf.zeros([1]),
-                    tf.tensor1d([
-                        normalize(user.age, minAge, maxAge) * this.weights.age
-                    ]),
-                    tf.zeros([categories.length]),
-                    tf.zeros([colors.length])
-                ])
-                .reshape([1,dimentions]);
-            }
+            r.vectors.stack = this.encodeUserVector(r, dimentions, minAge, maxAge, categories.length, colors.length);
 
             return r;
 
@@ -324,8 +308,34 @@ class RecommendationModel {
             }
         });
 
-        this.#model?.dispose();
-        this.#model = model;
+        this.#trainedModel?.dispose();
+        this.#trainedModel = model;
+    }
+
+    encodeUserVector(user, dimentions, minAge, maxAge, categoriesCount, colorsCount) {
+        let stackedVector = null;
+
+        if (user.purchases.length) {
+                stackedVector = tf
+                .stack(user.purchases.map((purchase) => {
+                    return purchase.concatVector ?? this.#state.products.list.find((product) => product.name === purchase.name)?.vectors.concat;
+                }))
+                .mean(0)
+                .reshape([1,dimentions]);
+        } else {
+            stackedVector = tf
+            .concat1d([
+                tf.zeros([1]), //preço é ignorado
+                tf.tensor1d([ //idade é único dado que temos do usuário, então normalizamos e aplicamos o peso
+                    normalize(user.age, minAge, maxAge) * this.weights.age
+                ]),
+                tf.zeros([categoriesCount]), // categoria ignorada
+                tf.zeros([colorsCount]) // color ignorada
+            ])
+            .reshape([1,dimentions]);
+        }
+
+        return stackedVector;
     }
 }
 
