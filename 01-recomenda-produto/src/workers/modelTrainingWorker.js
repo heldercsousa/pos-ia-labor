@@ -13,41 +13,9 @@ async function trainModel({ users }) {
     });
 
     await recommendationModel.reload(users);
-    console.log('recommendationModel.state', recommendationModel.state);  
-    
-    const productVectors = recommendationModel.state.products.list
-    .map(product => {
-        return {
-            name: product.name, 
-            meta: {...product},
-            vector: product.vectors.concat.dataSync() // Use dataSync() to get the underlying data as a typed array
-        };
-    }); 
 
-    const usersVectors = recommendationModel.state.users.list
-    .map(user => {
-        return {
-            name: user.name,
-            meta: {...user},
-            
-            vector: user.vectors.stack.dataSync()
-        };
-    });
-
-    console.log('productVectors', productVectors);
-    console.log('usersVectors', usersVectors);
-
-    postMessage({
-        type: workerEvents.trainingLog,
-        epoch: 1,
-        loss: 1,
-        accuracy: 1
-    });
-
-    setTimeout(() => {
-        postMessage({ type: workerEvents.progressUpdate, progress: { progress: 100 } });
-        postMessage({ type: workerEvents.trainingComplete });
-    }, 1000);
+    postMessage({ type: workerEvents.progressUpdate, progress: { progress: 100 } });
+    postMessage({ type: workerEvents.trainingComplete });
 }
 
 function recommend(user, ctx) {

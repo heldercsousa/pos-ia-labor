@@ -1,3 +1,5 @@
+import { workerEvents } from '../events/constants.js';
+
 /**
  * Recursively freezes an object, optionally skipping nested properties by key.
  * @param {*} value
@@ -42,6 +44,7 @@ class RecommendationModel {
     weights = this.weightsDefault;
 
     #state = null;
+    #model = null;
 
     /**
      * return the default weights for the recommendation model.
@@ -61,6 +64,14 @@ class RecommendationModel {
     }
 
     /**
+     * Trained recommendation model, or `null` until training succeeds.
+     * @returns {*}
+     */
+    get model() {
+        return this.#model;
+    }
+
+    /**
      * Loads the product catalog and rebuilds the model state for the users.
      * @param {Array<{age: number, purchases: Array<{name: string, price: number}>}>} users
      * @returns {Promise<void>}
@@ -73,7 +84,8 @@ class RecommendationModel {
         }
 
         const catalog = await response.json();
-        this.#state = freezeData(this.#buildState(catalog, users), ['vectors']);
+        this.#state = freezeData(this.#buildState(catalog, users), ['vectors','concatVector', 'trainingData', 'trainingDataInputs']);
+        await this.#configuraAndTrain();
     }
 
     #buildState(catalogList, userList) {
@@ -178,7 +190,7 @@ class RecommendationModel {
                     return pr;
                 }),
                 vectors: {
-                    stack: null
+                    stack: {}
                 }
             };
 
@@ -187,20 +199,37 @@ class RecommendationModel {
                 .stack(r.purchases.map((purchase) => purchase.concatVector))
                 .mean(0)
                 .reshape([1,dimentions]);
+            } else {
+                r.vectors.stack = tf
+                .concat1d([
+                    tf.zeros([1]),
+                    tf.tensor1d([
+                        normalize(user.age, minAge, maxAge) * this.weights.age
+                    ]),
+                    tf.zeros([categories.length]),
+                    tf.zeros([colors.length])
+                ])
+                .reshape([1,dimentions]);
             }
 
             return r;
 
         });
 
-        const trainingDataInputs = users
+        const dataInputs = users
+        .filter((user) => user.purchases.length)
         .flatMap((user) => catalog.map((product) => {
             return {
                 label: user.purchases.some((purchase) => purchase.name === product.name) ? 1 : 0,
-                user: user.vectors.stack?.dataSync(), // Use dataSync() to get the underlying data as a typed array
-                product: product.vectors.concat.dataSync() // Use dataSync() to get the underlying data as a typed array
+                input: [...user.vectors.stack.dataSync(), ...product.vectors.concat.dataSync()]
             };
         }));
+
+        const trainingDataInputs = {
+            xs: tf.tensor2d(dataInputs.map(di => di.input)),
+            ys: tf.tensor2d(dataInputs.map(di => di.label), [dataInputs.length, 1]),
+            inputDimensions: dimentions * 2 //tamanho igual a userVector + productVector
+        };
 
         return {
             products: {          
@@ -217,8 +246,86 @@ class RecommendationModel {
                 list: users
             },
             dimentions: dimentions,
+            dataInputs: dataInputs,
             trainingDataInputs: trainingDataInputs
         };
+    }
+
+    async #configuraAndTrain() {
+        const model = tf.sequential();
+        /*
+         Camada de entrada
+        - inputShape: Nümero de features por exemplo de treino (trainData. inputDim)
+            Exemplo: Se o vetor produto + usuärio = 20 nümeros, entäo inputDim = 20
+        - units: 128 neurönios (muitos "olhos" para detectar padröes)
+        - activation: 'relu' (mantem apenas sinais positivos, ajuda a aprender padrões não lineares)
+        */
+        model.add(
+            tf.layers.dense({
+                inputShape: [this.state.trainingDataInputs.inputDimensions],
+                units: 128,
+                activation: 'relu'
+            })
+        );
+
+        /*
+        camada oculta 1
+        -64 neurônios (menos que a primeira camada, começa a comprimir informação)
+        -activation: 'relu' (ainda extraindo combinações relevantes de features)
+        */
+        model.add(
+            tf.layers.dense({
+                units:64,
+                activation: 'relu'
+            })
+        )
+        /*
+        camada oculta 2
+        -32 neurônios (mais estreita de novo, destilando informaçóes mais improtantes)
+            exemplo: de muitos sinais, mantém apenas os padrões mais fortes
+        -activation: 'relu'
+        */
+        model.add(
+            tf.layers.dense({
+                units:32,
+                activation: 'relu'
+            })
+        )
+        /*
+        camada de saída
+        - 1 neurônio porque vamos retornar apenas uma pontuação de recomendação
+        - activation: 'sigmoid' comprime o resultado para o intervalo 0-1
+            exemplo: 0.9 = recomendação forte, 0.1=fraca
+        */
+        model.add(
+            tf.layers.dense({ units: 1, activation: 'sigmoid'})
+        );
+
+        model.compile({
+            optimizer: tf.train.adam(0.01),
+            loss: 'binaryCrossentropy', //perda binária, porque é um problema de classificação binária (comprou ou não comprou)
+            metrics: ['accuracy'] //vamos monitorar a acurácia durante o treino
+        });
+
+        await model.fit(this.state.trainingDataInputs.xs, this.state.trainingDataInputs.ys, {
+            epochs: 100,
+            batchSize: 32,
+            shuffle: true,
+            callbacks: {
+                onEpochEnd: (epoch, logs) => {
+
+                        postMessage({
+                            type: workerEvents.trainingLog,
+                            epoch: epoch,
+                            loss: logs.loss,
+                            accuracy: logs.acc
+                        });
+                }
+            }
+        });
+
+        this.#model?.dispose();
+        this.#model = model;
     }
 }
 
