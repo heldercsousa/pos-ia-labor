@@ -97,10 +97,7 @@ class RecommendationModel {
         const midAge = ages.length ? (minAge + maxAge) / 2 : null;
         const catalog = catalogList.map((product, index) => ({
             index,
-            name: product.name,
-            price: product.price,
-            color: product.color,
-            category: product.category,
+            ...product,
             statics: {...staticDefaultValue},
             vectors: {
                 price: {},
